@@ -8,12 +8,12 @@ import {
 /**
  * הגדרות מערכת - הזן כאן את המפתחות שלך
  */
-// 1. Gemini API Key (עבור ניתוח ה-AI)
+// 1. Gemini API Key (עבור ניתוח ה-AI) - וודא שהפעלת את ה-Generative Language API ב-Google Cloud
 const GEMINI_API_KEY = "AIzaSyCbEQsj8SHe-X2Y_akj9ZoBEzBIb96TQiE";
 
 // 2. Google Cloud API Key (עבור סייר הקבצים של גוגל דרייב)
-// הדבק כאן את המפתח שיצרת הרגע בשלב 1
-const GOOGLE_API_KEY = "AIzaSyDjFy0HBho-S5pYIHJN7dl2cVd0W_TawTA"; 
+// חשוב: החלף את הטקסט למטה במפתח שהעתקת מהמסך של "Create API Key"
+const GOOGLE_API_KEY = "הדבק_כאן_את_המפתח_החדש"; 
 
 // 3. Google Client ID (עבור תהליך ההתחברות)
 const GOOGLE_CLIENT_ID = "680437008053-voar1tv77bl98l3r1en64keamosjm0ml.apps.googleusercontent.com";
@@ -152,7 +152,10 @@ export default function App() {
         body: JSON.stringify(payload)
       });
 
-      if (!response.ok) throw new Error(`API Error: ${response.status}`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || `API Error: ${response.status}`);
+      }
       
       const result = await response.json();
       return JSON.parse(result.candidates[0].content.parts[0].text);
@@ -172,6 +175,7 @@ export default function App() {
       return;
     }
 
+    setError(null);
     setStatus('analyzing');
     setProgress(10);
     setScanText("AI Scanning frames & script context...");
@@ -190,7 +194,8 @@ export default function App() {
       setAiReport(report);
       setTimeout(() => setStatus('complete'), 500);
     } catch (err) {
-      setError("Analysis failed. Ensure Google Picker API is enabled and keys are correct.");
+      console.error(err);
+      setError(`Analysis failed: ${err.message}. Check if Gemini API is enabled for this key.`);
       setStatus('idle');
     }
   };
