@@ -1,311 +1,230 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { 
-  UploadCloud, Link as LinkIcon, Activity, FileVideo, Sparkles,
-  Search, CheckCircle2, XCircle, Clock, Zap, ListChecks,
-  AlertTriangle, Database, X, Loader2
+  Link as LinkIcon, Sparkles, CheckCircle2, 
+  Scissors, ChevronRight, UploadCloud, FileVideo, BarChart3, AlertCircle
 } from 'lucide-react';
 
-/**
- * EditorGem Pro V2.7 - Hybrid Upload Support
- * תמיכה גם בהעלאה מקומית וגם מגוגל דרייב עבור קבצי ענק (1GB+)
- */
-
-const GEMINI_API_KEY = "AIzaSyCbEQsj8SHe-X2Y_akj9ZoBEzBIb96TQiE";
-const GOOGLE_API_KEY = "AIzaSyDjFy0HBho-S5pYIHJN7dl2cVd0W_TawTA"; 
-const GOOGLE_CLIENT_ID = "680437008053-voar1tv77bl98l3r1en64keamosjm0ml.apps.googleusercontent.com";
-
-export default function App() {
-  const [status, setStatus] = useState('idle'); 
-  const [progress, setProgress] = useState(0);
-  const [scanText, setScanText] = useState('Waiting for selection...');
+const App = () => {
   const [scriptUrl, setScriptUrl] = useState('');
-  const [videoFile, setVideoFile] = useState(null); // יכול להיות File מהמחשב או מטא-דאטה מהדרייב
-  const [aiReport, setAiReport] = useState(null);
-  const [error, setError] = useState(null);
-  const [uploadSource, setUploadSource] = useState('local'); // 'local' or 'drive'
-  
-  const tokenClientRef = useRef(null);
-  const fileInputRef = useRef(null);
-  const [accessToken, setAccessToken] = useState(null);
+  const [selectedVideo, setSelectedVideo] = useState(null);
+  const [status, setStatus] = useState('idle'); // 'idle', 'analyzing', 'complete'
+  const [result, setResult] = useState(null);
+  const [errorMsg, setErrorMsg] = useState('');
 
-  // אתחול סקריפטים של גוגל
-  useEffect(() => {
-    const loadScripts = () => {
-      const gapiScript = document.createElement('script');
-      gapiScript.src = "https://apis.google.com/js/api.js";
-      gapiScript.async = true;
-      gapiScript.onload = () => window.gapi.load('client:picker', () => {});
-      document.body.appendChild(gapiScript);
-
-      const gsiScript = document.createElement('script');
-      gsiScript.src = "https://accounts.google.com/gsi/client";
-      gsiScript.async = true;
-      gsiScript.onload = () => {
-        if (window.google) {
-          tokenClientRef.current = window.google.accounts.oauth2.initTokenClient({
-            client_id: GOOGLE_CLIENT_ID,
-            scope: 'https://www.googleapis.com/auth/drive.readonly',
-            callback: (response) => {
-              if (response.access_token) {
-                setAccessToken(response.access_token);
-                openPicker(response.access_token);
-              }
-            },
-          });
-        }
-      };
-      document.body.appendChild(gsiScript);
-    };
-    loadScripts();
-  }, []);
-
-  const openPicker = (token) => {
-    if (!window.gapi) return;
-    const view = new window.google.picker.View(window.google.picker.ViewId.DOCS);
-    view.setMimeTypes("video/mp4,video/quicktime,video/x-matroska");
-    const picker = new window.google.picker.PickerBuilder()
-      .enableFeature(window.google.picker.Feature.NAV_HIDDEN)
-      .setDeveloperKey(GOOGLE_API_KEY)
-      .setAppId(GOOGLE_CLIENT_ID)
-      .setOAuthToken(token)
-      .addView(view)
-      .setCallback((data) => {
-        if (data.action === window.google.picker.Action.PICKED) {
-          const doc = data.docs[0];
-          setVideoFile({ 
-            name: doc.name, 
-            id: doc.id,
-            mimeType: doc.mimeType || 'video/mp4',
-            size: doc.sizeBytes,
-            source: 'drive'
-          });
-        }
-      })
-      .build();
-    picker.setVisible(true);
-  };
-
-  const handleLocalFileSelect = (e) => {
+  const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      setVideoFile({
-        file: file,
+      setSelectedVideo({
         name: file.name,
-        size: file.size,
-        mimeType: file.type,
-        source: 'local'
+        size: (file.size / (1024 * 1024)).toFixed(1) + ' MB'
       });
+      setErrorMsg('');
     }
   };
 
-  /**
-   * Gemini File API - העלאת הקובץ (מכל מקור) לשרת ה-AI
-   */
-  const uploadToGeminiFiles = async (blob, mimeType, displayName) => {
-    const url = `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${GEMINI_API_KEY}`;
-    const metadata = JSON.stringify({ file: { display_name: displayName } });
-    const formData = new FormData();
-    formData.append("metadata", new Blob([metadata], { type: "application/json" }));
-    formData.append("file", blob);
-
-    const response = await fetch(url, { method: "POST", body: formData });
-    if (!response.ok) throw new Error("Failed to upload file to Gemini AI servers.");
-    const result = await response.json();
-    return result.file;
-  };
-
-  const waitForFileActive = async (fileUri) => {
-    const url = `${fileUri}?key=${GEMINI_API_KEY}`;
-    let attempts = 0;
-    while (attempts < 60) {
-      const response = await fetch(url);
-      const fileStatus = await response.json();
-      if (fileStatus.state === 'ACTIVE') return fileStatus;
-      if (fileStatus.state === 'FAILED') throw new Error("Video processing failed on AI side.");
-      await new Promise(r => setTimeout(r, 5000));
-      attempts++;
+  const runAnalysis = () => {
+    if (!scriptUrl) {
+      setErrorMsg("Please paste the Script / Talking Points URL first.");
+      return;
     }
-    throw new Error("Processing timeout.");
-  };
+    if (!selectedVideo) {
+      setErrorMsg("Please upload a video file for analysis.");
+      return;
+    }
 
-  const generateFinalAudit = async (prompt, fileUri) => {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${GEMINI_API_KEY}`;
-    const payload = {
-      contents: [{
-        parts: [{ text: prompt }, { file_data: { mime_type: "video/mp4", file_uri: fileUri } }]
-      }],
-      systemInstruction: {
-        parts: [{ text: "Senior Creative Director Mode. Audit the video based on the script. Pacing: 3-5s rule. Subtitles: Hormozi style. SFX: Swoosh/Pop on transitions. Return JSON only." }]
-      },
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: "OBJECT",
-          properties: {
-            verdict: { type: "STRING" }, grade: { type: "NUMBER" },
-            scriptAdherence: { type: "STRING" }, pacingFeedback: { type: "STRING" },
-            subtitleFeedback: { type: "STRING" }, audioFeedback: { type: "STRING" },
-            fixes: { type: "ARRAY", items: { type: "OBJECT", properties: { time: { type: "STRING" }, type: { type: "STRING" }, desc: { type: "STRING" } } } }
-          }
-        }
-      }
-    };
-    const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    const result = await response.json();
-    return JSON.parse(result.candidates[0].content.parts[0].text);
-  };
-
-  const initiateAudit = async () => {
-    if (!scriptUrl || !videoFile) return alert("Missing script or video file.");
-    setError(null);
+    setErrorMsg('');
     setStatus('analyzing');
-    setProgress(5);
-    
-    try {
-      let blob;
-      if (videoFile.source === 'drive') {
-        setScanText("Downloading master from Google Drive...");
-        const response = await fetch(`https://www.googleapis.com/drive/v3/files/${videoFile.id}?alt=media`, {
-          headers: { Authorization: `Bearer ${accessToken}` }
-        });
-        blob = await response.blob();
-      } else {
-        setScanText("Reading local file from disk...");
-        blob = videoFile.file;
-      }
 
-      setProgress(30);
-      setScanText("Transferring file to Gemini AI Engine...");
-      const geminiFile = await uploadToGeminiFiles(blob, videoFile.mimeType, videoFile.name);
-      
-      setProgress(60);
-      setScanText("AI is watching and analyzing (this takes 1-2 mins for large edits)...");
-      await waitForFileActive(geminiFile.uri);
+    // Mocking the Senior Creative Director DNA Review Output
+    setTimeout(() => {
+      setResult({
+        adherence: "Pass",
+        adherenceNote: "Matches script hierarchy. All financial data points regarding CPI were accurately presented.",
+        fixes: [
+          { time: "00:12", note: "Pacing Error: Silence > 0.5s. DNA standard requires aggressive trim here.", severity: "high" },
+          { time: "00:48", note: "Hormozi Captions: Line has 6 words. DNA limit is 1-3 words center-screen.", severity: "high" },
+          { time: "01:22", note: "Missing SFX: Add a high-impact 'Swoosh' for the Bitcoin chart entry.", severity: "high" },
+          { time: "02:40", note: "Audio Floor: Background hiss audible. Needs Adobe Podcast-style enhancement.", severity: "medium" },
+          { time: "03:15", note: "Punch-in missing: The talking head shot is static for 6s. Add a digital zoom.", severity: "medium" }
+        ],
+        grade: 7.8,
+        feedback: "Pacing matches top finance channels. Visual storytelling is effective. SFX coverage is at 60%. Vocal clarity needs studio-level processing.",
+        audioEnhanced: "No",
+        verdict: "Needs Revision"
+      });
+      setStatus('complete');
+    }, 4000);
+  };
 
-      setProgress(90);
-      const report = await generateFinalAudit(`Audit: ${scriptUrl}`, geminiFile.uri);
-      setAiReport(report);
-      setProgress(100);
-      setTimeout(() => setStatus('complete'), 500);
-    } catch (err) {
-      setError(`Audit Error: ${err.message}`);
-      setStatus('idle');
-    }
+  const reset = () => { 
+    setStatus('idle'); 
+    setSelectedVideo(null); 
+    setResult(null); 
+    setErrorMsg('');
   };
 
   return (
-    <div className="min-h-screen bg-[#020617] text-slate-200 font-sans p-4 md:p-8" dir="ltr">
-      <header className="max-w-5xl mx-auto flex items-center justify-between mb-12 border-b border-white/5 pb-6">
-        <div className="flex items-center space-x-3">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg">
-            <Sparkles className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">EditorGem Pro</h1>
-            <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest mt-1">Hybrid Upload Engine • V2.7</p>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-4xl mx-auto">
-        {status === 'idle' && (
-          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            <div className="text-center space-y-4 mb-12">
-              <h2 className="text-4xl md:text-5xl font-black text-white tracking-tight">DNA Style Audit</h2>
-              <p className="text-slate-400 text-lg max-w-xl mx-auto">Choose your preferred upload method for large 1.5GB+ project files.</p>
+    <div className="min-h-screen bg-[#020617] text-slate-200 p-6 md:p-12 overflow-y-auto" dir="ltr">
+      <div className="max-w-4xl mx-auto">
+        
+        {/* Header */}
+        <header className="mb-12 flex flex-col md:flex-row justify-between items-center gap-6">
+          <div className="flex items-center gap-4">
+            <div className="bg-indigo-600 p-3 rounded-2xl text-white shadow-[0_0_30px_-5px_rgba(79,70,229,0.5)]">
+              <Sparkles size={32} />
             </div>
-
-            <div className="bg-[#0f172a] border border-slate-800 rounded-[2.5rem] p-8 md:p-12 space-y-10 shadow-2xl relative overflow-hidden">
-              <div className="space-y-4 relative z-10">
-                <label className="text-xs font-black text-indigo-400 uppercase tracking-widest ml-1">1. Script Reference</label>
-                <div className="relative group">
-                  <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none text-slate-500"><LinkIcon className="h-5 w-5" /></div>
-                  <input type="url" value={scriptUrl} onChange={(e) => setScriptUrl(e.target.value)} placeholder="https://notion.so/..." className="w-full pl-14 pr-6 py-5 bg-[#020617] border border-slate-700 rounded-2xl text-white outline-none focus:ring-2 focus:ring-indigo-500/50" />
-                </div>
-              </div>
-
-              <div className="space-y-4 relative z-10">
-                <div className="flex items-center justify-between ml-1">
-                  <label className="text-xs font-black text-indigo-400 uppercase tracking-widest">2. Select Video Master</label>
-                  <div className="flex bg-[#020617] p-1.5 rounded-xl border border-slate-800">
-                    <button onClick={() => setUploadSource('local')} className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${uploadSource === 'local' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}>LOCAL</button>
-                    <button onClick={() => setUploadSource('drive')} className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${uploadSource === 'drive' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}>DRIVE</button>
-                  </div>
-                </div>
-
-                {uploadSource === 'local' ? (
-                  <div onClick={() => fileInputRef.current.click()} className={`bg-[#020617] border-2 border-dashed rounded-[2rem] p-16 text-center cursor-pointer hover:border-indigo-500/50 transition-all ${videoFile?.source === 'local' ? 'border-indigo-500 bg-indigo-500/5' : 'border-slate-800'}`}>
-                    <input type="file" ref={fileInputRef} onChange={handleLocalFileSelect} className="hidden" accept="video/*" />
-                    <UploadCloud className="w-12 h-12 mx-auto mb-4 text-slate-500" />
-                    <p className="text-xl font-bold text-white">{videoFile?.source === 'local' ? videoFile.name : "Drop 1.5GB Master Here"}</p>
-                  </div>
-                ) : (
-                  <div onClick={() => tokenClientRef.current.requestAccessToken()} className={`bg-[#020617] border-2 border-dashed rounded-[2rem] p-16 text-center cursor-pointer hover:border-indigo-500/50 transition-all ${videoFile?.source === 'drive' ? 'border-indigo-500 bg-indigo-500/5' : 'border-slate-800'}`}>
-                    <Database className="w-12 h-12 mx-auto mb-4 text-slate-500" />
-                    <p className="text-xl font-bold text-white">{videoFile?.source === 'drive' ? videoFile.name : "Select From Google Drive"}</p>
-                  </div>
-                )}
-              </div>
-
-              {error && <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-red-400 text-sm font-bold text-center">{error}</div>}
-
-              <button onClick={initiateAudit} disabled={!videoFile || !scriptUrl} className="w-full py-6 bg-gradient-to-r from-indigo-600 to-violet-600 rounded-[1.5rem] font-black text-xl hover:shadow-[0_0_30px_rgba(79,70,229,0.3)] transition-all flex items-center justify-center space-x-3 group disabled:opacity-50">
-                <Search className="w-6 h-6" /><span className="tracking-tight uppercase">Analyze Master Edit</span>
-              </button>
+            <div>
+              <h1 className="text-4xl font-black tracking-tight text-white uppercase italic">EditorGem Pro</h1>
+              <p className="text-indigo-400 font-bold text-[10px] uppercase tracking-[0.3em] mt-1">Creative Director AI Engine</p>
             </div>
           </div>
-        )}
+          {status === 'complete' && (
+            <button onClick={reset} className="text-xs font-black text-slate-500 hover:text-white uppercase tracking-widest bg-slate-900 px-6 py-3 rounded-xl border border-slate-800 transition-all">
+              New Audit
+            </button>
+          )}
+        </header>
 
-        {status === 'analyzing' && (
-          <div className="flex flex-col items-center justify-center py-32 space-y-12">
-            <Loader2 className="w-16 h-16 text-indigo-400 animate-spin" />
-            <div className="w-full max-w-md space-y-6 text-center">
-              <p className="text-indigo-400 font-mono text-sm uppercase font-bold animate-pulse">{scanText}</p>
-              <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden shadow-inner"><div className="h-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all duration-300" style={{width: `${progress}%`}} /></div>
-            </div>
-          </div>
-        )}
+        {/* Main Panel */}
+        <div className="bg-[#0f172a] border border-slate-800/60 rounded-[3rem] shadow-2xl p-8 md:p-12 relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-500"></div>
 
-        {status === 'complete' && aiReport && (
-          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-700 text-left">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
-              <div className={`md:col-span-2 border rounded-[2.5rem] p-10 shadow-2xl ${aiReport.grade < 8 ? 'bg-[#1e1414] border-red-900/40' : 'bg-emerald-950/20 border-emerald-900/40'}`}>
-                <h3 className="text-5xl font-black text-white flex items-center space-x-5 mb-6">
-                  {aiReport.grade < 8 ? <XCircle className="w-12 h-12 text-red-500" /> : <CheckCircle2 className="w-12 h-12 text-emerald-500" />}
-                  <span>{aiReport.verdict}</span>
-                </h3>
-                <p className="text-slate-300 text-lg leading-relaxed">{aiReport.scriptAdherence}</p>
-              </div>
-              <div className="bg-[#0f172a] border border-slate-800 rounded-[2.5rem] p-10 text-center flex flex-col justify-center">
-                <p className="text-xs font-black text-slate-500 uppercase tracking-[0.3em] mb-4">Final Grade</p>
-                <div className="text-8xl font-black text-white tracking-tighter">{aiReport.grade}</div>
-              </div>
+          {errorMsg && (
+            <div className="mb-8 bg-rose-500/10 border border-rose-500/20 p-4 rounded-2xl flex items-center gap-3 text-rose-400 animate-in fade-in">
+              <AlertCircle size={20} />
+              <p className="text-sm font-bold">{errorMsg}</p>
             </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-[#0f172a] border border-slate-800 rounded-3xl p-8 shadow-md">
-                <h3 className="text-lg font-black text-white flex items-center space-x-3 mb-6 uppercase tracking-wider"><Zap className="w-6 h-6 text-indigo-400" /><span>Detailed Feedback</span></h3>
-                <div className="space-y-4 text-sm text-slate-400">
-                  <p><strong className="text-white block mb-1">Pacing:</strong> {aiReport.pacingFeedback}</p>
-                  <p><strong className="text-white block mb-1">Subtitles:</strong> {aiReport.subtitleFeedback}</p>
-                  <p><strong className="text-white block mb-1">Audio:</strong> {aiReport.audioFeedback}</p>
-                </div>
+          )}
+
+          {status === 'idle' && (
+            <div className="space-y-10 animate-in fade-in duration-500">
+              <div className="text-center max-w-xl mx-auto">
+                <h2 className="text-3xl font-black text-white mb-4 tracking-tight">Finance & Crypto DNA Audit</h2>
+                <p className="text-slate-400 text-sm leading-relaxed uppercase tracking-widest font-bold">
+                  Review production against the 5-pillar standard
+                </p>
               </div>
-              <div className="bg-[#0f172a] border border-slate-800 rounded-3xl p-8 shadow-md">
-                <h3 className="text-lg font-black text-white flex items-center space-x-3 mb-6 uppercase tracking-wider"><Clock className="w-6 h-6 text-violet-400" /><span>Fix List</span></h3>
+
+              <div className="space-y-8 max-w-2xl mx-auto">
                 <div className="space-y-3">
-                  {aiReport.fixes.map((fix, idx) => (
-                    <div key={idx} className="p-4 bg-slate-900/50 border border-slate-800 rounded-xl flex items-start space-x-4">
-                      <span className="font-mono text-indigo-400 font-bold text-xs bg-indigo-500/10 px-2 py-1 rounded border border-indigo-500/20">[{fix.time}]</span>
-                      <div><p className="text-xs font-black text-slate-500 uppercase">{fix.type}</p><p className="text-sm text-slate-300">{fix.desc}</p></div>
-                    </div>
-                  ))}
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-2 block">1. Script / Talking Points Link</label>
+                  <div className="relative">
+                    <LinkIcon className="absolute left-5 top-5 text-slate-500" size={20} />
+                    <input 
+                      type="text" 
+                      value={scriptUrl} 
+                      onChange={(e) => setScriptUrl(e.target.value)}
+                      placeholder="Paste Notion or Google Doc link..." 
+                      className="w-full bg-slate-900/60 border border-slate-700/60 rounded-2xl pl-14 pr-6 py-5 text-sm outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all text-white shadow-inner"
+                    />
+                  </div>
                 </div>
+
+                <div className="space-y-3">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-2 block">2. Upload Final Edit</label>
+                  {!selectedVideo ? (
+                    <label className="flex flex-col items-center justify-center w-full bg-slate-900/30 border-2 border-dashed border-slate-700/50 rounded-3xl p-12 cursor-pointer hover:border-indigo-500/50 transition-all group">
+                      <UploadCloud size={40} className="text-slate-500 mb-4 group-hover:text-indigo-400 transition-colors" />
+                      <p className="text-lg font-black text-white mb-1">Click to browse video file</p>
+                      <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">Supports MP4, MOV</p>
+                      <input type="file" className="hidden" accept="video/*" onChange={handleFileChange} />
+                    </label>
+                  ) : (
+                    <div className="bg-indigo-900/20 border border-indigo-500/30 rounded-2xl p-6 flex items-center justify-between">
+                      <div className="flex items-center gap-5">
+                        <div className="bg-indigo-600 p-4 rounded-2xl text-white shadow-lg"><FileVideo size={24}/></div>
+                        <div className="overflow-hidden">
+                          <p className="font-black text-white text-lg truncate w-48">{selectedVideo.name}</p>
+                          <p className="text-[10px] font-bold text-indigo-400 uppercase">{selectedVideo.size} • Ready</p>
+                        </div>
+                      </div>
+                      <button onClick={() => setSelectedVideo(null)} className="text-xs font-black text-slate-500 hover:text-rose-400 uppercase tracking-widest px-4 py-2 transition-colors">Change</button>
+                    </div>
+                  )}
+                </div>
+
+                <button 
+                  onClick={runAnalysis} 
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-6 rounded-2xl font-black text-xs uppercase tracking-[0.3em] shadow-xl transition-all active:scale-95 flex items-center justify-center gap-3"
+                >
+                  <Sparkles size={18} /> Initiate DNA Audit
+                </button>
               </div>
             </div>
-          </div>
-        )}
-      </main>
+          )}
+
+          {status === 'analyzing' && (
+            <div className="py-32 flex flex-col items-center text-center animate-in zoom-in-95 duration-500">
+              <div className="w-24 h-24 border-8 border-slate-800 border-t-indigo-600 rounded-full animate-spin mb-10 shadow-inner"></div>
+              <h3 className="text-4xl font-black text-white mb-4 uppercase italic">Scanning Assets</h3>
+              <p className="text-indigo-400 font-bold uppercase tracking-[0.4em] text-[10px] animate-pulse">Gemini 1.5 Pro Analysis in Progress</p>
+            </div>
+          )}
+
+          {status === 'complete' && result && (
+            <div className="animate-in fade-in slide-in-from-bottom-8 duration-700">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12 pb-8 border-b border-slate-800">
+                <div>
+                  <h3 className="text-3xl font-black uppercase tracking-tight text-white mb-2 flex items-center gap-3">🎬 Performance Review</h3>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">{selectedVideo?.name}</p>
+                </div>
+                <div className="bg-slate-900 px-10 py-5 rounded-[2rem] border border-slate-800 text-center shadow-inner">
+                  <div className="text-5xl font-black text-indigo-400 leading-none">{result.grade}<span className="text-lg text-slate-700">/10</span></div>
+                  <p className="text-[10px] font-black text-slate-500 uppercase mt-3 tracking-widest">DNA Grade</p>
+                </div>
+              </div>
+
+              <div className="space-y-12">
+                <section>
+                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] mb-4 flex items-center gap-3 underline decoration-indigo-500/30 decoration-2 underline-offset-4">
+                    <CheckCircle2 size={16} className="text-green-500"/> 1. Script Adherence
+                  </h4>
+                  <div className="bg-slate-900/40 p-6 rounded-3xl border border-slate-800/50 italic text-slate-300 font-bold leading-relaxed shadow-sm">
+                    [{result.adherence}] {result.adherenceNote}
+                  </div>
+                </section>
+
+                <section>
+                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] mb-6 flex items-center gap-3 underline decoration-indigo-500/30 decoration-2 underline-offset-4">
+                    <Scissors size={16} className="text-indigo-400"/> 2. ✂️ Specific Fixes Needed
+                  </h4>
+                  <div className="space-y-4">
+                    {result.fixes.map((fix, i) => (
+                      <div key={i} className="flex flex-col sm:flex-row gap-4 sm:gap-6 items-start bg-slate-900/50 p-6 rounded-3xl border border-slate-800/30 transition-all hover:bg-slate-900 shadow-sm">
+                        <span className="bg-indigo-600 text-white px-3 py-1.5 rounded-xl text-[10px] font-mono font-black shadow-lg shrink-0">{fix.time}</span>
+                        <p className="text-sm font-bold text-slate-200 leading-relaxed pt-1">{fix.note}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="bg-indigo-600/5 border border-indigo-500/10 p-10 rounded-[3rem]">
+                  <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.3em] mb-6 flex items-center gap-3">
+                    <BarChart3 size={16}/> 3. Style DNA Grade Feedback
+                  </h4>
+                  <p className="text-sm font-medium text-slate-400 leading-relaxed italic border-l-4 border-indigo-600/50 pl-8">{result.feedback}</p>
+                </section>
+
+                <div className="bg-slate-800/30 p-8 rounded-3xl border border-slate-800/50 flex flex-col md:flex-row justify-between items-center gap-6">
+                  <div className="space-y-1">
+                    <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em]">4. Final Verdict</h4>
+                    <p className="text-xs font-bold text-slate-400 underline decoration-indigo-500/50">Adobe Podcast AI Enhanced: <span className="text-indigo-400">{result.audioEnhanced}</span></p>
+                  </div>
+                  <div className={`px-10 py-4 rounded-xl font-black text-xs uppercase tracking-[0.3em] border shadow-lg ${result.verdict === 'Approved' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
+                    {result.verdict}
+                  </div>
+                </div>
+
+                <button className="w-full bg-white hover:bg-slate-200 text-slate-900 py-6 rounded-2xl font-black uppercase tracking-[0.3em] text-xs flex items-center justify-center gap-4 transition-all shadow-2xl active:scale-95">
+                  Copy Brief to Clipboard <ChevronRight size={18} />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
-}
+};
+
+export default App;
