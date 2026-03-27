@@ -11,7 +11,7 @@ import {
  */
 
 const GEMINI_API_KEY = "AIzaSyCbEQsj8SHe-X2Y_akj9ZoBEzBIb96TQiE";
-const GOOGLE_API_KEY = "AIzaSyCbEQsj8SHe-X2Y_akj9ZoBEzBIb96TQiE"; 
+const GOOGLE_API_KEY = "AIzaSyDjFy0HBho-S5pYIHJN7dl2cVd0W_TawTA"; 
 const GOOGLE_CLIENT_ID = "680437008053-voar1tv77bl98l3r1en64keamosjm0ml.apps.googleusercontent.com";
 
 export default function App() {
