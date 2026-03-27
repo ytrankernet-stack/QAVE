@@ -1,17 +1,31 @@
 <!DOCTYPE html>
-<html lang="he" dir="rtl">
+<html lang="en" dir="ltr">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EditorGem Pro | AI Quality Assurance</title>
-    <!-- טעינת ספריית העיצוב Tailwind -->
+    <title>EditorGem Pro | Senior Creative Director AI</title>
     <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
-    <link href="[https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap](https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap)" rel="stylesheet">
+    <link href="[https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap](https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap)" rel="stylesheet">
+    
+    <!-- Google API Loader & Identity Services -->
+    <script src="[https://apis.google.com/js/api.js](https://apis.google.com/js/api.js)"></script>
+    <script src="[https://accounts.google.com/gsi/client](https://accounts.google.com/gsi/client)"></script>
+
     <style>
-      body { font-family: 'Inter', sans-serif; }
+      body { 
+        font-family: 'Plus Jakarta Sans', sans-serif; 
+        background-color: #020617; 
+        color: #f8fafc;
+        margin: 0;
+      }
+      .glass-panel {
+        background: rgba(15, 23, 42, 0.7);
+        backdrop-filter: blur(16px);
+        border: 1px solid rgba(51, 65, 85, 0.4);
+      }
     </style>
   </head>
-  <body class="bg-slate-900">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
